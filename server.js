@@ -58,7 +58,7 @@ async function readJson(req) {
 
 function buildPrompt({ scenario, messages, readiness }) {
   const transcript = messages.map((item) => `${item.role}：${item.text}`).join("\n");
-  return `你是 K12 家长，正在参加顾问新人陪练。你必须始终扮演家长，不能变成老师或评价顾问。\n\n场景：${scenario.name || scenario.title || "咨询陪练"}\n家长初始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n本轮训练目标：${scenario.goal || "理解家长真实顾虑"}\n合规边界：${scenario.risk || scenario.boundary || "不承诺效果，不制造焦虑"}\n当前训练阶段：${readiness.stage || scenario.stage || "需求诊断"}\n还未完成：${(readiness.missing || []).join("；") || "已完成，可自然收口"}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"一条自然、口语化的家长回复，50-100 字", "ready_to_close": true/false}\n规则：根据顾问刚才的内容继续追问或确认；不要重复前一句；信息不足就只追问一个最关键的问题；出现提分承诺、稀缺催促或施压时明确表示不接受；只有当顾问完成共情、诊断和具体下一步后才同意自然收口。`;
+  return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n当前训练目标：${scenario.goal || "理解家长真实顾虑"}\n沟通边界：${scenario.risk || scenario.boundary || "不承诺效果，不制造焦虑"}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信，允许有“嗯”“其实”“我主要是怕”等自然口语；\n2. 每轮只推进一个真实顾虑：孩子意愿、具体学科困难、过往体验、时间、家庭商量或费用中的一个；不要把所有问题一次问完；\n3. 必须承接顾问刚才说的具体内容，再给出新的细节、犹豫或一个追问；不能复述开场白，也不能连续使用相同句式；\n4. 禁止使用“您觉得怎么做”“请您详细介绍”“方便先确认”这类客服腔；不要写长段落、编号、总结或教学建议；\n5. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓；\n6. 只有在顾问已完成共情、关键诊断并给出具体、低压力下一步后，才自然说“那我先和孩子商量下/我们按这个时间再对一下”。`;
 }
 
 async function askKimi(prompt, maxTokens = 500) {
@@ -72,6 +72,7 @@ async function askKimi(prompt, maxTokens = 500) {
       body: JSON.stringify({
         model,
         max_tokens: maxTokens,
+        temperature: 0.85,
         system: "优先输出有效 JSON；若无法输出 JSON，也只输出家长的自然回复正文。",
         messages: [
           { role: "user", content: prompt },
@@ -109,7 +110,7 @@ function parseJson(text, fallback) {
 }
 
 async function getParentReply(payload) {
-  const cleaned = await askKimi(buildPrompt(payload), 300);
+  const cleaned = await askKimi(buildPrompt(payload), 800);
   const parsed = parseJson(cleaned, {});
   const extracted = parsed.reply || cleaned.match(/"reply"\s*:\s*"([\s\S]*?)(?:"\s*[,}]|$)/)?.[1] || cleaned;
   return extracted.replace(/\\n/g, " ").replace(/^家长[：:]/, "").trim();
