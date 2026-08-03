@@ -9,7 +9,7 @@ const cards=[
 
 const titles={dashboard:'数据总览',practice:'AI 陪练',history:'训练记录',copilot:'实时建议引擎',knowledge:'知识库'};
 const subs={dashboard:'基于授权脱敏样本与审核卡片的团队能力概览',practice:'在安全、可评测的真实家长场景中练习判断与推进',history:'仅保存在当前浏览器，供顾问回看自己的训练与复盘',copilot:'输入当前上下文，得到阶段判断、风险提示与下一步',knowledge:'用审核后的策略卡，而不是原始通话记录支撑一线顾问'};
-const isDemoMode=location.hostname!=='localhost'&&location.hostname!=='127.0.0.1';
+const isDemoMode=location.protocol==='file:'||location.hostname.endsWith('github.io');
 const historyKey='advisor-practice-history-v1';
 function loadHistory(){try{return JSON.parse(localStorage.getItem(historyKey)||'[]')}catch{return []}}
 const state={view:'dashboard',scenario:cards[0],messages:[],turn:0,live:{empathy:0,diagnosis:0,action:0,compliance:20},model:'正在检测模型服务…',modelState:'checking',sending:false,review:null,history:loadHistory(),filter:'全部'};
