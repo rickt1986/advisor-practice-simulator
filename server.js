@@ -58,7 +58,8 @@ async function readJson(req) {
 
 function buildPrompt({ scenario, messages, readiness }) {
   const transcript = messages.map((item) => `${item.role}：${item.text}`).join("\n");
-  return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n当前训练目标：${scenario.goal || "理解家长真实顾虑"}\n沟通边界：${scenario.risk || scenario.boundary || "不承诺效果，不制造焦虑"}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信，允许有“嗯”“其实”“我主要是怕”等自然口语；\n2. 每轮只推进一个真实顾虑：孩子意愿、具体学科困难、过往体验、时间、家庭商量或费用中的一个；不要把所有问题一次问完；\n3. 必须承接顾问刚才说的具体内容，再给出新的细节、犹豫或一个追问；不能复述开场白，也不能连续使用相同句式；\n4. 禁止使用“您觉得怎么做”“请您详细介绍”“方便先确认”这类客服腔；不要写长段落、编号、总结或教学建议；\n5. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓；\n6. 只有在顾问已完成共情、关键诊断并给出具体、低压力下一步后，才自然说“那我先和孩子商量下/我们按这个时间再对一下”。`;
+  const courseFacts = scenario.courseFacts || { delivery: "课程以录播/回放学习为主，不是直播互动课堂。", support: "可安排试听、确认内容与学习节奏。", boundary: "不承诺效果。" };
+  return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信；\n2. 每轮只推进一个真实顾虑，不要把所有问题一次问完；\n3. 必须承接顾问刚才的具体内容，再给出新的细节、犹豫或一个追问；\n4. 不能提问或质疑与课程事实冲突的“直播互动、课堂举手、实时连麦答疑”等能力；除非顾问自己把课程形式说错，此时像真实家长一样追问澄清；\n5. 禁止客服腔、长段落、编号、总结或教学建议；\n6. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓。`;
 }
 
 async function askKimi(prompt, maxTokens = 500) {
@@ -122,7 +123,8 @@ async function testModelConnection() {
 }
 
 async function getCoachReview({ scenario, transcript }) {
-  const prompt = `你是K12顾问训练教练。仅依据下列对话复盘，不虚构事实，不承诺效果，不使用焦虑营销。按共情、诊断、下一步、合规分别0-25/30/25/20打分。必须逐条分析每一句【顾问】回复；每条都说明做对了什么、具体问题、以及一条能直接替换发送的范文。最后给出一段适合本场景的完整示范话术（2-4句）。输出严格JSON：{"scores":{"empathy":0,"diagnosis":0,"action":0,"compliance":0},"summary":"一句总评","missing":["..."],"rewrite":"下一句范文","turns":[{"turn":1,"advisor":"顾问原话","what_worked":"具体亮点或无","problem":"具体问题","better_reply":"替换范文"}],"full_script":"2-4句完整示范话术"}。\n场景：${scenario.name}\n边界：${scenario.risk}\n对话：\n${transcript}`;
+  const courseFacts = scenario.courseFacts || { delivery: "课程以录播/回放学习为主，不是直播互动课堂。", support: "可安排试听、确认内容与学习节奏。", boundary: "不承诺效果。" };
+  const prompt = `你是带过一线 K12 顾问的业务主管，正在复盘新人对话。只依据下列事实复盘，不虚构课程能力，不承诺效果。\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n要求：先指出这轮家长的唯一主矛盾；逐条分析每一句【顾问】回复是否抓住主矛盾、是否把课程形式说错、是否有强推或 AI 腔。范文必须是顾问微信里真的会说的短句，禁止“赋能、承接、主顾虑、关键事实、闭环、数据跟他谈、淘汰率、保证”等表达。\n输出严格JSON：{"scores":{"empathy":0,"diagnosis":0,"action":0,"compliance":0},"summary":"主矛盾 + 一句判断","missing":["..."],"rewrite":"一条自然微信回复","turns":[{"turn":1,"advisor":"顾问原话","what_worked":"具体亮点或无","problem":"是否跑偏及原因","better_reply":"替换范文"}],"full_script":"2-4句自然示范话术"}。\n场景：${scenario.name}\n边界：${scenario.risk}\n对话：\n${transcript}`;
   return parseJson(await askKimi(prompt, 1200), { scores: { empathy: 8, diagnosis: 10, action: 8, compliance: 20 }, summary: "建议先补齐家长主顾虑，再约定下一步。", missing: ["补一个诊断问题"], rewrite: "我理解您的担心，方便先确认孩子现在最困扰的问题和可沟通的时间吗？", turns: [], full_script: "我理解您担心钱花了却不适合孩子。方便先说说他现在最抗拒或最卡的是哪一部分吗？我先根据情况帮您判断是否值得继续了解；如果适合，我们再约一个您方便的时间，用 10 分钟把下一步说清楚。" });
 }
 
