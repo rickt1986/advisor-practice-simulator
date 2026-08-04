@@ -71,6 +71,45 @@ function scenarioAnchor(scenario = {}) {
   return anchors[scenario.id] || scenario.goal || "围绕家长本轮最初提出的核心顾虑完成诊断与推进。";
 }
 
+function scenarioGuardReply({ scenario = {}, messages = [] }) {
+  const guards = {
+    price: {
+      detour: /二讲|主讲|督课|作业|打电话|答疑|课前|课后|退费|退款|到账|回放|几点|周末|直播互动|服务时段/,
+      replies: [
+        "这些细节我先记下了，但我最怕的还是钱花了孩子又不用。怎么先判断他这次会不会愿意坚持？",
+        "时段和服务可以再确认，我现在更在意孩子会不会又学两周就停了，这笔钱是不是又白花？",
+        "我不想先被服务细节说服。先说说怎么判断孩子能不能跟上、愿不愿意继续，这对我更重要。",
+      ],
+    },
+    will: {
+      detour: /价格|费用|退费|退款|回放|二讲|时段|几点|服务/,
+      replies: ["这些我可以后面再看，我现在最担心的是孩子会不会一开始就抵触。怎么先弄清他的真实想法？", "先不急着聊这些细节，我怕的是孩子又不愿意学。我们怎么判断他到底卡在哪儿？"],
+    },
+    trial: {
+      detour: /价格|费用|退费|退款|二讲|时段|几点|服务/,
+      replies: ["这些可以后面再确认，我更想先知道孩子自己听完会不会排斥、能不能听进去。", "先别急着讲服务，我想先让孩子真正听一次，再看他愿不愿意继续。"],
+    },
+    delay: {
+      detour: /课程细节|二讲|回放|服务|时段|价格/,
+      replies: ["这些信息我先记下，我现在还没想清楚真正卡的是哪一点，得先把这个说透。", "先别急着补更多细节，我需要先判断这件事到底适不适合我们家。"],
+    },
+    fit: {
+      detour: /价格|退费|退款|二讲|时段|服务/,
+      replies: ["这些可以后面再确认，我更想先把孩子最急的学科问题和能承受的学习量弄清楚。", "先不急着讲这些，我想知道数学和物理到底哪一块最该先解决。"],
+    },
+    time: {
+      detour: /价格|退费|退款|二讲|回放|服务细节/,
+      replies: ["这些可以后面再确认，我现在最怕的是时间排出来也坚持不了。我们先定一个真能做到的小安排吧。", "先别急着展开服务细节，我想先确认这个时间孩子和我能不能真的执行下来。"],
+    },
+  };
+  const guard = guards[scenario.id];
+  if (!guard) return "";
+  const parentMessages = messages.filter((item) => item.role === "家长").slice(1);
+  const detours = parentMessages.filter((item) => guard.detour.test(item.text || "")).length;
+  if (detours < 1) return "";
+  return guard.replies[(parentMessages.length + detours) % guard.replies.length];
+}
+
 function buildPrompt({ scenario, messages, readiness }) {
   const anchor = scenarioAnchor(scenario);
   const transcript = `${messages.map((item) => `${item.role}：${item.text}`).join("\n")}\n\n【本轮训练锚点】${anchor}\n【锚点护栏】家长可以就顾问刚提出的一个服务细节追问一次；同一支线（服务时段、回放、退费、监督方式等）不得连续追问第二次。若顾问编造未确认服务，先简短表示需要确认，然后立即把话题拉回训练锚点。不能因为顾问不断补充细节而离开本场景主线。`;
@@ -128,6 +167,8 @@ function parseJson(text, fallback) {
 }
 
 async function getParentReply(payload) {
+  const forcedReply = scenarioGuardReply(payload);
+  if (forcedReply) return forcedReply;
   const cleaned = await askKimi(buildPrompt(payload), 180, {
     model: parentModel,
     thinking: { type: "disabled" },
