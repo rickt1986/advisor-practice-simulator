@@ -33,6 +33,9 @@ const model = process.env.KIMI_CODING_MODEL || kimiCoding.models?.[0]?.id || "ki
 // 陪练中的家长回复是高频、短输出的即时交互：使用 K2.6 非思考模式，
 // 复盘与实时建议仍沿用默认模型，以避免为了速度牺牲诊断质量。
 const parentModel = process.env.KIMI_PARENT_MODEL || "kimi-k2.6";
+const trainingAssets = (() => {
+  try { return require("./training-assets.json"); } catch { return { version: "unavailable", grades: {} }; }
+})();
 const mime = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
 const requestWindowMs = 60 * 1000;
 const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_WINDOW || 30);
@@ -69,6 +72,17 @@ function scenarioAnchor(scenario = {}) {
     time: "时间冲突：排除家庭真实执行障碍，确认一个能完成的小动作和时间。",
   };
   return anchors[scenario.id] || scenario.goal || "围绕家长本轮最初提出的核心顾虑完成诊断与推进。";
+}
+
+const gradeScenarioMap = { price: "价格异议、预算与比价", will: "孩子意愿、抵触与学习动力", trial: "试听、体验、回放与有效期", delay: "用户拒绝留资/隐私顾虑", fit: "学情诊断与薄弱学科", time: "时间安排、执行冲突与跟进" };
+
+function trainingCardContext(scenario = {}) {
+  const profile = scenario.trainingProfile || {};
+  if (profile.channel !== "训练营私域" || !/^[3-9]$/.test(String(profile.grade || ""))) return "当前训练画像：通用私域。没有启用年级训练卡，只遵循场景主线与课程事实。";
+  const card = trainingAssets.grades?.[String(profile.grade)]?.[gradeScenarioMap[scenario.id]];
+  if (!card) return "当前训练画像：训练营私域，但此场景没有匹配的年级训练卡，只遵循场景主线与课程事实。";
+  const situations = card.situations.map((item) => `情形${item.situation}：触发=${item.trigger}；必补=${item.requiredFacts}；目标=${item.goal}；分支=${item.branches}；禁说=${item.forbidden}；完成=${item.completion}；年级校准=${item.gradeGuidance}`).join("\n");
+  return `当前训练画像：${profile.grade}年级 · 训练营私域。已命中蒸馏卡《${card.title}》（${trainingAssets.version}）。\n${situations}\n使用原则：先根据家长真实表达选最贴近的一个情形；一轮只补一个事实，不把三种情形全部问完。推荐表达只学口语节奏，不能逐字复述。若年级校准写明“不强行带入”，不得为了体现年级而生硬提年级。`;
 }
 
 function scenarioGuardReply({ scenario = {}, messages = [] }) {
@@ -113,9 +127,10 @@ function scenarioGuardReply({ scenario = {}, messages = [] }) {
 
 function buildPrompt({ scenario, messages, readiness }) {
   const anchor = scenarioAnchor(scenario);
+  const assetContext = trainingCardContext(scenario);
   const transcript = `${messages.map((item) => `${item.role}：${item.text}`).join("\n")}\n\n【本轮训练锚点】${anchor}\n【锚点护栏】家长可以就顾问刚提出的一个服务细节追问一次；同一支线（服务时段、回放、退费、监督方式等）不得连续追问第二次。若顾问编造未确认服务，先简短表示需要确认，然后立即把话题拉回训练锚点。若此前已经拉回过主线，本轮必须换一个主线维度继续追问，严禁复用前一句或再次讨论服务细节。`;
   const courseFacts = scenario.courseFacts || { delivery: "课程采用在线直播双师大班课形式。", support: "可安排试听、确认内容与学习节奏；直播互动与双师服务以实际课程安排为准。", boundary: "不承诺效果。" };
-  return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信；\n2. 每轮只推进一个真实顾虑，不要把所有问题一次问完；\n3. 必须承接顾问刚才的具体内容，再给出新的细节、犹豫或一个追问；\n4. 在线直播双师大班课、课堂互动本身不是错误；只有顾问把未确认的服务说成已包含，或把直播双师大班说成录播/回放时，才像真实家长一样追问澄清；\n5. 禁止客服腔、长段落、编号、总结或教学建议；\n6. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓。`;
+  return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n蒸馏训练规则：${assetContext}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信；\n2. 每轮只推进一个真实顾虑，不要把所有问题一次问完；\n3. 必须承接顾问刚才的具体内容，再给出新的细节、犹豫或一个追问；\n4. 在线直播双师大班课、课堂互动本身不是错误；只有顾问把未确认的服务说成已包含，或把直播双师大班说成录播/回放时，才像真实家长一样追问澄清；\n5. 禁止客服腔、长段落、编号、总结或教学建议；\n6. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓。`;
 }
 
 async function askKimi(prompt, maxTokens = 500, options = {}) {
@@ -189,12 +204,13 @@ async function testModelConnection() {
 
 async function getCoachReview({ scenario, transcript: rawTranscript }) {
   const anchor = scenarioAnchor(scenario);
+  const assetContext = trainingCardContext(scenario);
   const transcript = `${rawTranscript}\n\n【本轮训练锚点】${anchor}\n【复盘重点】若顾问连续围绕服务细节、时间、退费等支线沟通，未回到训练锚点，要明确指出“被支线带跑偏”，并给出拉回主线的替换句。`;
   const courseFacts = scenario.courseFacts || { delivery: "课程采用在线直播双师大班课形式。", support: "可安排试听、确认内容与学习节奏；直播互动与双师服务以实际课程安排为准。", boundary: "不承诺效果。" };
   const advisorCount = (transcript.match(/^顾问：/gm) || []).length;
   const prompt = `你是带过一线 K12 顾问的业务主管，正在复盘新人对话。只依据下列事实复盘，不虚构课程能力，不承诺效果。\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n这不是总结报告，而是逐句教练。对话中一共有 ${advisorCount} 句【顾问】回复，你必须只输出恰好 ${advisorCount} 条 turns，顺序与原对话一致，advisor 必须逐字抄回对应的顾问原话。\n\n逐句规则：\n1. problem 只分析这一句造成的具体问题，不能把整轮的问题复制到每一条；\n2. better_reply 是“这句话当时应该怎样说”的单条替代回复，必须承接当时上一句家长的话，不能拿最后一轮的话术倒灌到前面；\n3. 每条 better_reply 必须不同，不能用相同开头或相同整句。整份复盘中“我理解/我明白”最多出现一次；\n4. 若第一次把课程形式说错，可在该条明确纠正一次。后续再次说错时，只指出仍在重复错误，并把替代句改为推进家长当前问题，禁止反复复制“我们不是直播互动课”；\n5. 不要把“愿意继续沟通”“问题方向基本对”等空话当作 what_worked；没有亮点就写“无明显有效动作”；\n6. 范文必须是顾问微信里真的会说的短句，禁止“赋能、承接、主顾虑、关键事实、闭环、数据跟他谈、淘汰率、保证”等 AI 或压迫性表达。\n\n输出严格 JSON：{"scores":{"empathy":0,"diagnosis":0,"action":0,"compliance":0},"summary":"家长唯一主矛盾 + 对本轮最大判断","missing":["最多2条可执行缺口"],"rewrite":"只给下一轮最该发的一句，和逐句范文不同","turns":[{"turn":1,"advisor":"顾问原话","what_worked":"6-20字具体亮点或无明显有效动作","problem":"15-40字，仅针对本句","better_reply":"18-55字、该时点可直接发出的唯一改写"}],"full_script":"按真实对话节奏写3-5句完整示范，不复用 turns 中的整句"}。\n场景：${scenario.name}\n边界：${scenario.risk}\n对话：\n${transcript}`;
   const correctedPrompt = prompt.replace("若第一次把课程形式说错，可在该条明确纠正一次。后续再次说错时，只指出仍在重复错误，并把替代句改为推进家长当前问题，禁止反复复制“我们不是直播互动课”；", "课程是在线直播双师大班课，不能把直播、双师或课堂互动本身判为错误；只有说成录播/回放，或虚构未确认服务时才纠正。第一次课程形式说错可明确纠正一次，后续回到家长当前问题；");
-  const guardedPrompt = `${correctedPrompt}\n\n课程事实硬边界：只可使用“在线直播双师大班课”“可安排试听、确认内容与学习节奏”“互动与双师服务以实际安排为准”。禁止编造旁听几节、不强制连麦、课前找老师打招呼、私下问老师、保证跟上或任何未确认的具体服务。`;
+  const guardedPrompt = `${correctedPrompt}\n\n蒸馏训练规则：${assetContext}\n课程事实硬边界：只可使用“在线直播双师大班课”“可安排试听、确认内容与学习节奏”“互动与双师服务以实际安排为准”。禁止编造旁听几节、不强制连麦、课前找老师打招呼、私下问老师、保证跟上或任何未确认的具体服务。`;
   const fallback = { scores: { empathy: 8, diagnosis: 10, action: 8, compliance: 20 }, summary: "建议逐句确认家长真实顾虑，再推进下一步。", missing: ["围绕家长刚说的内容追问", "避免虚构课程形式"], rewrite: "我先把您最担心的这点确认清楚，再看下一步怎么安排会更合适。", turns: [], full_script: "先把孩子目前最卡的地方说清楚，我们再判断是否适合继续了解。" };
   // 结构化复盘使用与家长相同的稳定 K2.6 路由；提示词已明确限定逐句规则，
   // 关闭思考避免长时间无响应后又退回到重复的本地模板。
