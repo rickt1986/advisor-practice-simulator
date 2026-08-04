@@ -106,13 +106,14 @@ function scenarioGuardReply({ scenario = {}, messages = [] }) {
   if (!guard) return "";
   const parentMessages = messages.filter((item) => item.role === "家长").slice(1);
   const detours = parentMessages.filter((item) => guard.detour.test(item.text || "")).length;
-  if (detours < 1) return "";
+  const alreadyBridged = parentMessages.some((item) => guard.replies.includes(String(item.text || "").trim()));
+  if (detours < 1 || alreadyBridged) return "";
   return guard.replies[(parentMessages.length + detours) % guard.replies.length];
 }
 
 function buildPrompt({ scenario, messages, readiness }) {
   const anchor = scenarioAnchor(scenario);
-  const transcript = `${messages.map((item) => `${item.role}：${item.text}`).join("\n")}\n\n【本轮训练锚点】${anchor}\n【锚点护栏】家长可以就顾问刚提出的一个服务细节追问一次；同一支线（服务时段、回放、退费、监督方式等）不得连续追问第二次。若顾问编造未确认服务，先简短表示需要确认，然后立即把话题拉回训练锚点。不能因为顾问不断补充细节而离开本场景主线。`;
+  const transcript = `${messages.map((item) => `${item.role}：${item.text}`).join("\n")}\n\n【本轮训练锚点】${anchor}\n【锚点护栏】家长可以就顾问刚提出的一个服务细节追问一次；同一支线（服务时段、回放、退费、监督方式等）不得连续追问第二次。若顾问编造未确认服务，先简短表示需要确认，然后立即把话题拉回训练锚点。若此前已经拉回过主线，本轮必须换一个主线维度继续追问，严禁复用前一句或再次讨论服务细节。`;
   const courseFacts = scenario.courseFacts || { delivery: "课程采用在线直播双师大班课形式。", support: "可安排试听、确认内容与学习节奏；直播互动与双师服务以实际课程安排为准。", boundary: "不承诺效果。" };
   return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信；\n2. 每轮只推进一个真实顾虑，不要把所有问题一次问完；\n3. 必须承接顾问刚才的具体内容，再给出新的细节、犹豫或一个追问；\n4. 在线直播双师大班课、课堂互动本身不是错误；只有顾问把未确认的服务说成已包含，或把直播双师大班说成录播/回放时，才像真实家长一样追问澄清；\n5. 禁止客服腔、长段落、编号、总结或教学建议；\n6. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓。`;
 }
