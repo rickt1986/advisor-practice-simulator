@@ -39,9 +39,13 @@ const model = process.env.KIMI_CODING_MODEL || kimiCoding.models?.[0]?.id || "ki
 const parentModel = process.env.KIMI_PARENT_MODEL || "kimi-k2.6";
 const volcAsrApiKey = process.env.VOLC_ASR_API_KEY || readPrivateEnvValue("VOLC_ASR_API_KEY");
 const volcAsrResourceId = process.env.VOLC_ASR_RESOURCE_ID || readPrivateEnvValue("VOLC_ASR_RESOURCE_ID");
-const trainingAssets = (() => {
-  try { return require("./training-assets.json"); } catch { return { version: "unavailable", grades: {} }; }
-})();
+function loadTrainingAsset(file) {
+  try { return require(file); } catch { return { version: "unavailable", grades: {} }; }
+}
+const trainingAssetsByChannel = {
+  "训练营私域": loadTrainingAsset("./training-assets.json"),
+  "信息流": loadTrainingAsset("./training-assets-infoflow.json"),
+};
 const mime = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
 const requestWindowMs = 60 * 1000;
 const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_WINDOW || 30);
@@ -187,15 +191,20 @@ function scenarioAnchor(scenario = {}) {
   return anchors[scenario.id] || scenario.goal || "围绕家长本轮最初提出的核心顾虑完成诊断与推进。";
 }
 
-const gradeScenarioMap = { price: "价格异议、预算与比价", will: "孩子意愿、抵触与学习动力", trial: "试听、体验、回放与有效期", delay: "用户拒绝留资/隐私顾虑", fit: "学情诊断与薄弱学科", time: "时间安排、执行冲突与跟进" };
+const gradeScenarioMaps = {
+  "训练营私域": { price: "价格异议、预算与比价", will: "孩子意愿、抵触与学习动力", trial: "试听、体验、回放与有效期", delay: "用户拒绝留资/隐私顾虑", fit: "学情诊断与薄弱学科", time: "时间安排、执行冲突与跟进" },
+  "信息流": { price: "价格异议、预算与比价", will: "孩子意愿、抵触与学习动力", trial: "试听、体验、回放与有效期", delay: "用户拒绝留资/隐私顾虑", fit: "学情诊断与薄弱学科", time: "时间安排、执行冲突与跟进" },
+};
 
 function trainingCardContext(scenario = {}) {
   const profile = scenario.trainingProfile || {};
-  if (profile.channel !== "训练营私域" || !/^[3-9]$/.test(String(profile.grade || ""))) return "当前训练画像：通用私域。没有启用年级训练卡，只遵循场景主线与课程事实。";
-  const card = trainingAssets.grades?.[String(profile.grade)]?.[gradeScenarioMap[scenario.id]];
-  if (!card) return "当前训练画像：训练营私域，但此场景没有匹配的年级训练卡，只遵循场景主线与课程事实。";
+  const asset = trainingAssetsByChannel[profile.channel];
+  const scenarioMap = gradeScenarioMaps[profile.channel];
+  if (!asset || !scenarioMap || !/^[3-9]$/.test(String(profile.grade || ""))) return "当前训练画像：通用私域。没有启用年级训练卡，只遵循场景主线与课程事实。";
+  const card = asset.grades?.[String(profile.grade)]?.[scenarioMap[scenario.id]];
+  if (!card) return `当前训练画像：${profile.channel}，但此场景没有匹配的年级训练卡，只遵循场景主线与课程事实。`;
   const situations = card.situations.map((item) => `情形${item.situation}：触发=${item.trigger}；必补=${item.requiredFacts}；目标=${item.goal}；分支=${item.branches}；禁说=${item.forbidden}；完成=${item.completion}；年级校准=${item.gradeGuidance}`).join("\n");
-  return `当前训练画像：${profile.grade}年级 · 训练营私域。已命中蒸馏卡《${card.title}》（${trainingAssets.version}）。\n${situations}\n使用原则：先根据家长真实表达选最贴近的一个情形；一轮只补一个事实，不把三种情形全部问完。推荐表达只学口语节奏，不能逐字复述。若年级校准写明“不强行带入”，不得为了体现年级而生硬提年级。`;
+  return `当前训练画像：${profile.grade}年级 · ${profile.channel}。已命中蒸馏卡《${card.title}》（${asset.version}）。\n${situations}\n使用原则：先根据家长真实表达选最贴近的一个情形；一轮只补一个事实，不把三种情形全部问完。推荐表达只学口语节奏，不能逐字复述。若年级校准写明“不强行带入”，不得为了体现年级而生硬提年级。`;
 }
 
 function scenarioGuardReply({ scenario = {}, messages = [] }) {

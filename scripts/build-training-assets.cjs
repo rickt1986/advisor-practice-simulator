@@ -3,6 +3,9 @@ const path = require("node:path");
 
 const sourceDir = process.argv[2];
 const outputFile = process.argv[3] || path.join(process.cwd(), "training-assets.json");
+const channel = process.argv[4] || "训练营私域";
+const source = process.argv[5] || "私域获客渠道｜Agent训练版分年级实践卡";
+const version = process.argv[6] || "2026-08-04-private-domain-grade-v1";
 if (!sourceDir) throw new Error("用法：node scripts/build-training-assets.cjs <训练卡目录> [输出文件]");
 
 function field(block, label) {
@@ -35,9 +38,9 @@ for (const file of fs.readdirSync(sourceDir).filter((name) => /年级_Agent训�
 }
 
 const asset = {
-  version: "2026-08-04-private-domain-grade-v1",
-  channel: "训练营私域",
-  source: "私域获客渠道｜Agent训练版分年级实践卡",
+  version,
+  channel,
+  source,
   grades,
 };
 fs.writeFileSync(outputFile, `${JSON.stringify(asset, null, 2)}\n`);
