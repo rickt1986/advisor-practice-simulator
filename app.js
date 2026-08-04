@@ -7,6 +7,15 @@ const cards=[
   {id:'time',name:'时间冲突',stage:'推进执行',persona:'孙妈妈，单亲家庭，白天上班。孩子初一，晚上有作业和篮球课，母子沟通时间很零碎。',voice:'经常隔一会儿才回，优先确认事情会不会增加执行负担。',goal:'排除真实执行障碍，确认能做到的下一步。',parent:'我白天不太方便回消息，孩子这周还有考试。不是不重视，就是怕后面跟不上节奏。',strategy:'执行障碍排除',tip:'共同确定一个小于10分钟的确认动作和时间。',risk:'不把忙碌理解为不重视。'}
 ];
 
+const openingVariants={
+  price:['我看了一下费用，确实不便宜。之前也买过课，后面孩子就不愿意点开了。','你们这个价格我有点犹豫，怕钱花了，孩子坚持不了几天又闲置。','单科算下来也不是小数目。我最担心的不是贵一点，是最后没效果。','我之前给孩子报过一次课，买完没人管，没多久就放着了，这次不太敢轻易决定。'],
+  will:['她前面上过一段课，后面就不太愿意听。这次我也怕她一开始答应，过两天又抵触。','孩子一听补课就不太高兴，我不想硬压着她学，怕反而更抗拒。','她最近作业都拖得晚，再加课会不会更烦？我想先看看她到底愿不愿意。','孩子不是完全不学，就是总说跟不上、没意思。这样的情况怎么判断要不要加课？'],
+  trial:['昨天是我听的，孩子没听到。我觉得老师讲得还可以，但也不知道他自己会不会排斥。','试听我想安排，但孩子晚上时间不太固定，怕约了又赶不上。','我可以先让孩子听一节，不过他之前试听过别的课，说听不进去。','上次那节体验课孩子没给什么反馈，我也不知道他到底觉得难还是没兴趣。'],
+  delay:['我先再看看吧，家里也得商量一下。现在一下子做决定，我心里还没底。','您先别急着推荐，我还在对比，主要想再确认到底适不适合孩子。','我得先跟孩子爸爸说一下，他比较在意时间和费用，今天不太好马上定。','不是不考虑，就是信息有点多，我现在还没想清楚最该先解决什么。'],
+  fit:['他数学、物理都有点跟不上，但我不想一开始就报一堆课，孩子压力会更大。','孩子这次数学掉得比较多，物理也开始吃力，我不知道该先补哪一科。','他基础不算特别差，就是题目一变就容易卡住。你们这种情况怎么安排？','我只想先解决最急的问题，不想一上来全科都报，怕孩子更抵触。'],
+  time:['我白天不太方便回消息，孩子这周还有考试。不是不重视，就是怕后面跟不上节奏。','我下班到家都比较晚，孩子还有作业，真担心排了课也坚持不下来。','孩子晚上有其他课，周末也不完全空，时间上我得先算一算。','最近家里事情多，我怕开始了又总缺课，最后反而白花钱。']
+};
+
 const courseFacts={delivery:'课程采用在线直播双师大班课形式。',support:'顾问可以协助安排试听、匹配课程内容与学习节奏；直播互动与双师服务以实际课程安排为准。',boundary:'不能承诺提分、保证孩子会喜欢，或把未确认的服务说成已包含。'};
 const gradeCardNames={训练营私域:{price:'价格异议、预算与比价',will:'孩子意愿、抵触与学习动力',trial:'试听、体验、回放与有效期',delay:'用户拒绝留资/隐私顾虑',fit:'学情诊断与薄弱学科',time:'时间安排、执行冲突与跟进'},信息流:{price:'价格异议、预算与比价',will:'孩子意愿、抵触与学习动力',trial:'试听、体验、回放与有效期',delay:'用户拒绝留资/隐私顾虑',fit:'学情诊断与薄弱学科',time:'时间安排、执行冲突与跟进'}};
 const grades=['3','4','5','6','7','8','9'];
@@ -17,13 +26,14 @@ const subs={dashboard:'基于授权脱敏样本与审核卡片的团队能力概
 const isDemoMode=location.protocol==='file:'||location.hostname.endsWith('github.io');
 const historyKey='advisor-practice-history-v1';
 function loadHistory(){try{return JSON.parse(localStorage.getItem(historyKey)||'[]')}catch{return []}}
-const state={view:'dashboard',scenario:cards[0],messages:[],turn:0,live:{empathy:0,diagnosis:0,action:0,compliance:20},model:'正在检测模型服务…',modelState:'checking',sending:false,reviewing:false,review:null,history:loadHistory(),filter:'全部',grade:'8',channel:'训练营私域'};
+const state={view:'dashboard',scenario:cards[0],messages:[],turn:0,live:{empathy:0,diagnosis:0,action:0,compliance:20},model:'正在检测模型服务…',modelState:'checking',sending:false,reviewing:false,review:null,history:loadHistory(),filter:'全部',grade:'8',channel:'训练营私域',openingQueues:{},lastOpenings:{}};
 let voiceCapture=null,voiceTranscribing=false;
 const $=s=>document.querySelector(s);
 const escape=s=>String(s).replace(/[&<>"]/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[x]));
 function trainingProfile(){let enabled=Boolean(gradeCardNames[state.channel]);return {grade:state.grade,channel:state.channel,assetVersion:state.channel==='信息流'?'2026-08-03-infoflow-grade-v1':'2026-08-04-private-domain-grade-v1',card:enabled?gradeCardNames[state.channel][state.scenario.id]:''}}
 function profileLabel(){let p=trainingProfile();return p.card?`${p.grade} 年级 · ${p.channel}`:`${p.grade} 年级 · 通用私域（不强加年级规则）`}
-function resetPractice(){state.messages=[{role:'家长',text:state.scenario.parent}];state.turn=0;state.live={empathy:0,diagnosis:0,action:0,compliance:20};state.reviewing=false;state.review=null}
+function nextOpening(scenario){let options=openingVariants[scenario.id]||[scenario.parent],queue=state.openingQueues[scenario.id]||[];if(!queue.length){queue=[...options].sort(()=>Math.random()-.5);if(options.length>1&&queue[0]===state.lastOpenings[scenario.id])[queue[0],queue[1]]=[queue[1],queue[0]]}let opening=queue.shift();state.openingQueues[scenario.id]=queue;state.lastOpenings[scenario.id]=opening;return opening}
+function resetPractice(){state.messages=[{role:'家长',text:nextOpening(state.scenario)}];state.turn=0;state.live={empathy:0,diagnosis:0,action:0,compliance:20};state.reviewing=false;state.review=null}
 function updateVoiceButton(listening){let button=$('#voice');if(!button)return;button.classList.toggle('listening',listening);button.textContent=listening?'● 正在录音，点击结束':'语音输入'}
 async function transcribeAudio(audio,mime){if(isDemoMode)throw Error('豆包语音转写仅在受控线上服务可用，请访问 advisor.yfspp.com。');let response=await fetch('/api/asr/transcribe',{method:'POST',headers:{'Content-Type':mime||'audio/webm'},body:audio}),data=await response.json();if(!response.ok)throw Error(data.error||'语音转写失败');return data.text||''}
 async function stopVoiceInput({transcribe=true}={}){let capture=voiceCapture;if(!capture)return;voiceCapture=null;let recorder=capture.recorder;let stopped=new Promise(resolve=>{if(recorder.state==='inactive')return resolve();recorder.addEventListener('stop',resolve,{once:true});recorder.stop()});await stopped;capture.stream.getTracks().forEach(track=>track.stop());updateVoiceButton(false);if(!transcribe)return;let blob=new Blob(capture.chunks,{type:recorder.mimeType||capture.mime||'audio/webm'});if(!capture.chunks.length||blob.size<1024)return toast('没有采到有效语音，请检查系统麦克风权限后重试。');voiceTranscribing=true;let button=$('#voice');if(button){button.disabled=true;button.textContent='正在转写…'}try{let text=await transcribeAudio(await blob.arrayBuffer(),blob.type);if(!text)throw Error('已采到声音，但没有识别出文字；请靠近麦克风再试。');let field=$('#reply');if(field){field.value=[field.value.trim(),text].filter(Boolean).join(field.value.trim()?' ':'');field.focus()}}catch(error){toast(error.message||'语音转写失败，请重试')}finally{voiceTranscribing=false;let voice=$('#voice');if(voice){voice.disabled=false;updateVoiceButton(false)}}}
@@ -58,4 +68,4 @@ async function checkModel(){if(isDemoMode){toast('这是公开体验版：使用
 async function initModelStatus(){if(isDemoMode){state.model='公开体验版 · 本地模拟';state.modelState='ready';render();return}if(location.protocol==='file:'){state.model='文件模式：AI 不可用，请访问 localhost:8080';state.modelState='error';render();return}try{let r=await fetch('/api/config');let d=await r.json();if(!r.ok||!d.configured)throw Error('服务端未配置模型');state.model=`Kimi Coding 已配置 · ${d.model}（点击检测）`;state.modelState='ready'}catch{state.model='服务端不可达 · 请启动 localhost:8080';state.modelState='error'}render()}
 function bind(){document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{if(b.dataset.view!=='practice')stopVoiceInput({transcribe:false});state.view=b.dataset.view;render()});document.querySelectorAll('[data-record]').forEach(b=>b.onclick=()=>openTraining(b.dataset.record));$('#modelStatus').onclick=checkModel;if(state.view==='practice'){$('#scenario').onchange=e=>{stopVoiceInput({transcribe:false});state.scenario=cards.find(c=>c.id===e.target.value);resetPractice();render()};$('#grade').onchange=e=>{stopVoiceInput({transcribe:false});state.grade=e.target.value;resetPractice();toast(`已切换为 ${state.grade} 年级训练，已重新开始本轮。`);render()};$('#channel').onchange=e=>{stopVoiceInput({transcribe:false});state.channel=e.target.value;resetPractice();toast(state.channel==='通用私域'?'已切换为通用私域规则，不强加年级差异。':`已启用${state.channel}年级蒸馏卡。`);render()};$('#reply').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}};$('#voice').onclick=toggleVoiceInput;$('#send').onclick=send;$('#end').onclick=review}if(state.view==='copilot')$('#analyse').onclick=analyse;if(state.view==='knowledge')document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;render()})}
 function toast(s){let t=$('#toast');t.textContent=s;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
-state.messages=[{role:'家长',text:state.scenario.parent}];render();initModelStatus();
+resetPractice();render();initModelStatus();
