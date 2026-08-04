@@ -148,7 +148,8 @@ async function transcribeWithVolcAsr(audio) {
         if (parsed.type === 9 && parsed.flags === 3) return finish(null, latestText);
       } catch (error) { finish(error); }
     });
-    socket.on("error", () => finish(new Error("豆包语音识别连接失败，请稍后重试")));
+    socket.on("unexpected-response", (_request, response) => finish(new Error(`豆包语音识别鉴权失败（HTTP ${response.statusCode || "未知"}）`)));
+    socket.on("error", (error) => finish(new Error(`豆包语音识别连接失败：${error.message || "网络异常"}`)));
     socket.on("close", () => { if (!settled) finish(latestText ? null : new Error("豆包语音识别未返回文字")); });
   });
 }
