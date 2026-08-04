@@ -1,6 +1,9 @@
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const zlib = require("node:zlib");
+const { WebSocket } = require("ws");
 
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || "127.0.0.1";
@@ -33,6 +36,8 @@ const model = process.env.KIMI_CODING_MODEL || kimiCoding.models?.[0]?.id || "ki
 // 陪练中的家长回复是高频、短输出的即时交互：使用 K2.6 非思考模式，
 // 复盘与实时建议仍沿用默认模型，以避免为了速度牺牲诊断质量。
 const parentModel = process.env.KIMI_PARENT_MODEL || "kimi-k2.6";
+const volcAsrApiKey = process.env.VOLC_ASR_API_KEY || readPrivateEnvValue("VOLC_ASR_API_KEY");
+const volcAsrResourceId = process.env.VOLC_ASR_RESOURCE_ID || readPrivateEnvValue("VOLC_ASR_RESOURCE_ID");
 const trainingAssets = (() => {
   try { return require("./training-assets.json"); } catch { return { version: "unavailable", grades: {} }; }
 })();
@@ -60,6 +65,92 @@ async function readJson(req) {
   let body = "";
   for await (const chunk of req) body += chunk;
   return JSON.parse(body || "{}");
+}
+
+async function readBuffer(req, maxBytes = 12 * 1024 * 1024) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) throw new Error("音频文件过大，请控制在 12MB 内");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function asrFrame(messageType, flags, serialization, payload) {
+  const compressed = zlib.gzipSync(payload);
+  const header = Buffer.from([0x11, (messageType << 4) | flags, (serialization << 4) | 0x01, 0x00]);
+  const size = Buffer.alloc(4);
+  size.writeUInt32BE(compressed.length);
+  return Buffer.concat([header, size, compressed]);
+}
+
+function parseAsrFrame(data) {
+  const frame = Buffer.from(data);
+  if (frame.length < 8) return {};
+  const headerSize = (frame[0] & 0x0f) * 4;
+  const type = frame[1] >> 4;
+  const flags = frame[1] & 0x0f;
+  const compression = frame[2] & 0x0f;
+  let offset = headerSize;
+  if (type === 9 && (flags === 1 || flags === 3)) offset += 4;
+  if (type === 15) {
+    const code = frame.readUInt32BE(offset);
+    const size = frame.readUInt32BE(offset + 4);
+    return { type, flags, error: frame.subarray(offset + 8, offset + 8 + size).toString("utf8"), code };
+  }
+  const size = frame.readUInt32BE(offset);
+  let payload = frame.subarray(offset + 4, offset + 4 + size);
+  if (compression === 1) payload = zlib.gunzipSync(payload);
+  try { return { type, flags, body: JSON.parse(payload.toString("utf8")) }; } catch { return { type, flags }; }
+}
+
+async function transcribeWithVolcAsr(audio) {
+  if (!volcAsrApiKey || !volcAsrResourceId) throw new Error("豆包语音识别尚未配置");
+  if (audio.length < 48) throw new Error("没有采集到有效语音");
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    let settled = false;
+    let latestText = "";
+    const finish = (error, text) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.terminate();
+      error ? reject(error) : resolve(text || latestText);
+    };
+    const socket = new WebSocket("wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream", {
+      headers: {
+        "X-Api-Key": volcAsrApiKey,
+        "X-Api-Resource-Id": volcAsrResourceId,
+        "X-Api-Request-Id": requestId,
+        "X-Api-Sequence": "-1",
+      },
+      handshakeTimeout: 10000,
+    });
+    const timeout = setTimeout(() => finish(new Error("豆包语音识别超时，请重试")), 30000);
+    socket.on("open", () => {
+      const request = Buffer.from(JSON.stringify({
+        user: { uid: "advisor-practice" },
+        audio: { format: "wav", codec: "raw", rate: 16000, bits: 16, channel: 1, language: "zh-CN" },
+        request: { model_name: "bigmodel", enable_itn: true, enable_punc: true, show_utterances: false },
+      }));
+      socket.send(asrFrame(1, 0, 1, request));
+      socket.send(asrFrame(2, 2, 0, audio));
+    });
+    socket.on("message", (data) => {
+      try {
+        const parsed = parseAsrFrame(data);
+        if (parsed.error) return finish(new Error(`豆包语音识别失败：${parsed.error}`));
+        const text = parsed.body?.result?.text?.trim();
+        if (text) latestText = text;
+        if (parsed.type === 9 && parsed.flags === 3) return finish(null, latestText);
+      } catch (error) { finish(error); }
+    });
+    socket.on("error", () => finish(new Error("豆包语音识别连接失败，请稍后重试")));
+    socket.on("close", () => { if (!settled) finish(latestText ? null : new Error("豆包语音识别未返回文字")); });
+  });
 }
 
 function scenarioAnchor(scenario = {}) {
@@ -230,10 +321,15 @@ async function getCopilot({ context }) {
 
 http.createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/api/config") return json(res, 200, { configured: Boolean(apiKey && model), provider: "Kimi Coding", model: parentModel, parentThinking: "disabled" });
-    if (req.method === "GET" && req.url === "/api/health") return json(res, 200, { ok: true, configured: Boolean(apiKey && model) });
+    if (req.method === "GET" && req.url === "/api/config") return json(res, 200, { configured: Boolean(apiKey && model), provider: "Kimi Coding", model: parentModel, parentThinking: "disabled", asrConfigured: Boolean(volcAsrApiKey && volcAsrResourceId) });
+    if (req.method === "GET" && req.url === "/api/health") return json(res, 200, { ok: true, configured: Boolean(apiKey && model), asrConfigured: Boolean(volcAsrApiKey && volcAsrResourceId) });
     if (req.method === "POST" && req.url.startsWith("/api/") && !allowRequest(req)) return json(res, 429, { error: "请求过于频繁，请稍后再试。" });
     if (req.method === "POST" && req.url === "/api/model-test") return json(res, 200, { ok: true, provider: "Kimi Coding", model: parentModel, thinking: "disabled", response: await testModelConnection() });
+    if (req.method === "POST" && req.url === "/api/asr/transcribe") {
+      const audio = await readBuffer(req);
+      const text = await transcribeWithVolcAsr(audio);
+      return json(res, 200, { text });
+    }
     if (req.method === "POST" && req.url === "/api/parent-reply") return json(res, 200, { reply: await getParentReply(await readJson(req)) });
     if (req.method === "POST" && req.url === "/api/coach-score") {
       const payload = await readJson(req);
