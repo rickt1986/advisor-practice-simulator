@@ -30,6 +30,9 @@ const kimiCoding = readKimiCodingConfig();
 const apiKey = process.env.KIMI_CODING_API_KEY || readPrivateEnvValue("KIMI_CODING_API_KEY") || kimiCoding.apiKey;
 const baseUrl = (process.env.KIMI_CODING_BASE_URL || kimiCoding.baseUrl || "https://api.kimi.com/coding/").replace(/\/$/, "");
 const model = process.env.KIMI_CODING_MODEL || kimiCoding.models?.[0]?.id || "kimi-code";
+// 陪练中的家长回复是高频、短输出的即时交互：使用 K2.6 非思考模式，
+// 复盘与实时建议仍沿用默认模型，以避免为了速度牺牲诊断质量。
+const parentModel = process.env.KIMI_PARENT_MODEL || "kimi-k2.6";
 const mime = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
 const requestWindowMs = 60 * 1000;
 const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_WINDOW || 30);
@@ -62,7 +65,7 @@ function buildPrompt({ scenario, messages, readiness }) {
   return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信；\n2. 每轮只推进一个真实顾虑，不要把所有问题一次问完；\n3. 必须承接顾问刚才的具体内容，再给出新的细节、犹豫或一个追问；\n4. 不能提问或质疑与课程事实冲突的“直播互动、课堂举手、实时连麦答疑”等能力；除非顾问自己把课程形式说错，此时像真实家长一样追问澄清；\n5. 禁止客服腔、长段落、编号、总结或教学建议；\n6. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓。`;
 }
 
-async function askKimi(prompt, maxTokens = 500) {
+async function askKimi(prompt, maxTokens = 500, options = {}) {
   if (!apiKey || !model) throw new Error("未设置有效的 KIMI_CODING_API_KEY");
   let upstream;
   let lastEmptyResponse = false;
@@ -71,9 +74,10 @@ async function askKimi(prompt, maxTokens = 500) {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
-        model,
+        model: options.model || model,
         max_tokens: maxTokens,
         temperature: 0.85,
+        ...(options.thinking ? { thinking: options.thinking } : {}),
         system: "优先输出有效 JSON；若无法输出 JSON，也只输出家长的自然回复正文。",
         messages: [
           { role: "user", content: prompt },
@@ -111,14 +115,20 @@ function parseJson(text, fallback) {
 }
 
 async function getParentReply(payload) {
-  const cleaned = await askKimi(buildPrompt(payload), 800);
+  const cleaned = await askKimi(buildPrompt(payload), 180, {
+    model: parentModel,
+    thinking: { type: "disabled" },
+  });
   const parsed = parseJson(cleaned, {});
   const extracted = parsed.reply || cleaned.match(/"reply"\s*:\s*"([\s\S]*?)(?:"\s*[,}]|$)/)?.[1] || cleaned;
   return extracted.replace(/\\n/g, " ").replace(/^家长[：:]/, "").trim();
 }
 
 async function testModelConnection() {
-  const reply = await askKimi("你正在进行连通性测试。请只回复：连接正常", 300);
+  const reply = await askKimi("你正在进行连通性测试。请只回复：连接正常", 80, {
+    model: parentModel,
+    thinking: { type: "disabled" },
+  });
   return reply.replace(/\s+/g, " ").slice(0, 80);
 }
 
@@ -135,10 +145,10 @@ async function getCopilot({ context }) {
 
 http.createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/api/config") return json(res, 200, { configured: Boolean(apiKey && model), provider: "Kimi Coding", model });
+    if (req.method === "GET" && req.url === "/api/config") return json(res, 200, { configured: Boolean(apiKey && model), provider: "Kimi Coding", model: parentModel, parentThinking: "disabled" });
     if (req.method === "GET" && req.url === "/api/health") return json(res, 200, { ok: true, configured: Boolean(apiKey && model) });
     if (req.method === "POST" && req.url.startsWith("/api/") && !allowRequest(req)) return json(res, 429, { error: "请求过于频繁，请稍后再试。" });
-    if (req.method === "POST" && req.url === "/api/model-test") return json(res, 200, { ok: true, provider: "Kimi Coding", model, response: await testModelConnection() });
+    if (req.method === "POST" && req.url === "/api/model-test") return json(res, 200, { ok: true, provider: "Kimi Coding", model: parentModel, thinking: "disabled", response: await testModelConnection() });
     if (req.method === "POST" && req.url === "/api/parent-reply") return json(res, 200, { reply: await getParentReply(await readJson(req)) });
     if (req.method === "POST" && req.url === "/api/coach-score") {
       const payload = await readJson(req);
