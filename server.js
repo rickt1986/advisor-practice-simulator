@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const zlib = require("node:zlib");
+const { spawn } = require("node:child_process");
 const { WebSocket } = require("ws");
 
 const port = Number(process.env.PORT || 8080);
@@ -76,6 +77,25 @@ async function readBuffer(req, maxBytes = 12 * 1024 * 1024) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
+}
+
+async function normalizeAudioForAsr(audio) {
+  return new Promise((resolve, reject) => {
+    const output = [];
+    const errors = [];
+    const converter = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"]);
+    const timeout = setTimeout(() => { converter.kill("SIGKILL"); reject(new Error("音频转换超时，请缩短录音后重试")); }, 20000);
+    converter.stdout.on("data", (chunk) => output.push(chunk));
+    converter.stderr.on("data", (chunk) => errors.push(chunk));
+    converter.on("error", () => { clearTimeout(timeout); reject(new Error("服务器音频转换不可用")); });
+    converter.on("close", (code) => {
+      clearTimeout(timeout);
+      const wav = Buffer.concat(output);
+      if (code !== 0 || wav.length < 48) return reject(new Error(`录音格式无法识别${errors.length ? "，请重新录制" : ""}`));
+      resolve(wav);
+    });
+    converter.stdin.end(audio);
+  });
 }
 
 function asrFrame(messageType, flags, serialization, payload) {
@@ -329,7 +349,8 @@ http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/model-test") return json(res, 200, { ok: true, provider: "Kimi Coding", model: parentModel, thinking: "disabled", response: await testModelConnection() });
     if (req.method === "POST" && req.url === "/api/asr/transcribe") {
       const audio = await readBuffer(req);
-      const text = await transcribeWithVolcAsr(audio);
+      const wav = await normalizeAudioForAsr(audio);
+      const text = await transcribeWithVolcAsr(wav);
       return json(res, 200, { text });
     }
     if (req.method === "POST" && req.url === "/api/parent-reply") return json(res, 200, { reply: await getParentReply(await readJson(req)) });
