@@ -61,8 +61,8 @@ async function readJson(req) {
 
 function buildPrompt({ scenario, messages, readiness }) {
   const transcript = messages.map((item) => `${item.role}：${item.text}`).join("\n");
-  const courseFacts = scenario.courseFacts || { delivery: "课程以录播/回放学习为主，不是直播互动课堂。", support: "可安排试听、确认内容与学习节奏。", boundary: "不承诺效果。" };
-  return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信；\n2. 每轮只推进一个真实顾虑，不要把所有问题一次问完；\n3. 必须承接顾问刚才的具体内容，再给出新的细节、犹豫或一个追问；\n4. 不能提问或质疑与课程事实冲突的“直播互动、课堂举手、实时连麦答疑”等能力；除非顾问自己把课程形式说错，此时像真实家长一样追问澄清；\n5. 禁止客服腔、长段落、编号、总结或教学建议；\n6. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓。`;
+  const courseFacts = scenario.courseFacts || { delivery: "课程采用在线直播双师大班课形式。", support: "可安排试听、确认内容与学习节奏；直播互动与双师服务以实际课程安排为准。", boundary: "不承诺效果。" };
+  return `你是一个真实的中国 K12 家长，在微信里和课程顾问沟通。你必须始终扮演家长，不能变成老师、销售或评价者。\n\n人物背景：${scenario.persona || "普通 K12 家长"}\n表达习惯：${scenario.voice || "自然、简短、有保留"}\n当前场景：${scenario.name || scenario.title || "咨询陪练"}\n起始顾虑：${scenario.parent || scenario.opening || "请结合当前对话判断"}\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n对话记录：\n${transcript}\n\n请只输出 JSON，不要 Markdown：{"reply":"家长本轮微信回复", "ready_to_close": true/false}\n硬性要求：\n1. 回复 15-45 个汉字，最多两句，像手机上顺手回的微信；\n2. 每轮只推进一个真实顾虑，不要把所有问题一次问完；\n3. 必须承接顾问刚才的具体内容，再给出新的细节、犹豫或一个追问；\n4. 在线直播双师大班课、课堂互动本身不是错误；只有顾问把未确认的服务说成已包含，或把直播双师大班说成录播/回放时，才像真实家长一样追问澄清；\n5. 禁止客服腔、长段落、编号、总结或教学建议；\n6. 顾问出现提分承诺、稀缺催促或施压时，像真实家长一样表示不舒服或想缓一缓。`;
 }
 
 async function askKimi(prompt, maxTokens = 500, options = {}) {
@@ -133,18 +133,20 @@ async function testModelConnection() {
 }
 
 async function getCoachReview({ scenario, transcript }) {
-  const courseFacts = scenario.courseFacts || { delivery: "课程以录播/回放学习为主，不是直播互动课堂。", support: "可安排试听、确认内容与学习节奏。", boundary: "不承诺效果。" };
+  const courseFacts = scenario.courseFacts || { delivery: "课程采用在线直播双师大班课形式。", support: "可安排试听、确认内容与学习节奏；直播互动与双师服务以实际课程安排为准。", boundary: "不承诺效果。" };
   const advisorCount = (transcript.match(/^顾问：/gm) || []).length;
   const prompt = `你是带过一线 K12 顾问的业务主管，正在复盘新人对话。只依据下列事实复盘，不虚构课程能力，不承诺效果。\n课程事实：${courseFacts.delivery} ${courseFacts.support} ${courseFacts.boundary}\n\n这不是总结报告，而是逐句教练。对话中一共有 ${advisorCount} 句【顾问】回复，你必须只输出恰好 ${advisorCount} 条 turns，顺序与原对话一致，advisor 必须逐字抄回对应的顾问原话。\n\n逐句规则：\n1. problem 只分析这一句造成的具体问题，不能把整轮的问题复制到每一条；\n2. better_reply 是“这句话当时应该怎样说”的单条替代回复，必须承接当时上一句家长的话，不能拿最后一轮的话术倒灌到前面；\n3. 每条 better_reply 必须不同，不能用相同开头或相同整句。整份复盘中“我理解/我明白”最多出现一次；\n4. 若第一次把课程形式说错，可在该条明确纠正一次。后续再次说错时，只指出仍在重复错误，并把替代句改为推进家长当前问题，禁止反复复制“我们不是直播互动课”；\n5. 不要把“愿意继续沟通”“问题方向基本对”等空话当作 what_worked；没有亮点就写“无明显有效动作”；\n6. 范文必须是顾问微信里真的会说的短句，禁止“赋能、承接、主顾虑、关键事实、闭环、数据跟他谈、淘汰率、保证”等 AI 或压迫性表达。\n\n输出严格 JSON：{"scores":{"empathy":0,"diagnosis":0,"action":0,"compliance":0},"summary":"家长唯一主矛盾 + 对本轮最大判断","missing":["最多2条可执行缺口"],"rewrite":"只给下一轮最该发的一句，和逐句范文不同","turns":[{"turn":1,"advisor":"顾问原话","what_worked":"6-20字具体亮点或无明显有效动作","problem":"15-40字，仅针对本句","better_reply":"18-55字、该时点可直接发出的唯一改写"}],"full_script":"按真实对话节奏写3-5句完整示范，不复用 turns 中的整句"}。\n场景：${scenario.name}\n边界：${scenario.risk}\n对话：\n${transcript}`;
+  const correctedPrompt = prompt.replace("若第一次把课程形式说错，可在该条明确纠正一次。后续再次说错时，只指出仍在重复错误，并把替代句改为推进家长当前问题，禁止反复复制“我们不是直播互动课”；", "课程是在线直播双师大班课，不能把直播、双师或课堂互动本身判为错误；只有说成录播/回放，或虚构未确认服务时才纠正。第一次课程形式说错可明确纠正一次，后续回到家长当前问题；");
+  const guardedPrompt = `${correctedPrompt}\n\n课程事实硬边界：只可使用“在线直播双师大班课”“可安排试听、确认内容与学习节奏”“互动与双师服务以实际安排为准”。禁止编造旁听几节、不强制连麦、课前找老师打招呼、私下问老师、保证跟上或任何未确认的具体服务。`;
   const fallback = { scores: { empathy: 8, diagnosis: 10, action: 8, compliance: 20 }, summary: "建议逐句确认家长真实顾虑，再推进下一步。", missing: ["围绕家长刚说的内容追问", "避免虚构课程形式"], rewrite: "我先把您最担心的这点确认清楚，再看下一步怎么安排会更合适。", turns: [], full_script: "先把孩子目前最卡的地方说清楚，我们再判断是否适合继续了解。" };
   // 结构化复盘使用与家长相同的稳定 K2.6 路由；提示词已明确限定逐句规则，
   // 关闭思考避免长时间无响应后又退回到重复的本地模板。
   const reviewOptions = { model: parentModel, thinking: { type: "disabled" } };
-  const first = parseJson(await askKimi(prompt, 1500, reviewOptions), fallback);
+  const first = parseJson(await askKimi(guardedPrompt, 1500, reviewOptions), fallback);
   const replies = (first.turns || []).map((item) => String(item?.better_reply || "").replace(/\s+/g, ""));
   const valid = Array.isArray(first.turns) && first.turns.length === advisorCount && replies.every(Boolean) && new Set(replies).size === replies.length;
   if (valid) return first;
-  const retryPrompt = `${prompt}\n\n上一次草稿不合格：逐句数量不对或改写重复。请完全重新生成，尤其确保每个 better_reply 都是对应当时语境的不同句子。`;
+  const retryPrompt = `${guardedPrompt}\n\n上一次草稿不合格：逐句数量不对或改写重复。请完全重新生成，尤其确保每个 better_reply 都是对应当时语境的不同句子。`;
   return parseJson(await askKimi(retryPrompt, 1500, reviewOptions), first);
 }
 
