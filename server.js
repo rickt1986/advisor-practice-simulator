@@ -46,6 +46,20 @@ const trainingAssetsByChannel = {
   "训练营私域": loadTrainingAsset("./training-assets.json"),
   "信息流": loadTrainingAsset("./training-assets-infoflow.json"),
 };
+function getTrainingAssetStats() {
+  const assets = Object.values(trainingAssetsByChannel).filter((asset) => Object.keys(asset.grades || {}).length);
+  const gradeSet = new Set();
+  let scenarios = 0;
+  let situations = 0;
+  for (const asset of assets) {
+    const grades = Object.entries(asset.grades || {});
+    grades.forEach(([grade]) => gradeSet.add(grade));
+    const firstGrade = grades[0]?.[1] || {};
+    scenarios += Object.keys(firstGrade).length;
+    for (const [, cards] of grades) for (const card of Object.values(cards)) situations += card.situations?.length || 0;
+  }
+  return { channels: assets.length, grades: gradeSet.size, scenarios, situations, activePracticeEntries: 6 };
+}
 const mime = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
 const requestWindowMs = 60 * 1000;
 const maxRequestsPerWindow = Number(process.env.MAX_REQUESTS_PER_WINDOW || 30);
@@ -352,7 +366,7 @@ async function getCopilot({ context }) {
 
 http.createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/api/config") return json(res, 200, { configured: Boolean(apiKey && model), provider: "Kimi Coding", model: parentModel, parentThinking: "disabled", asrConfigured: Boolean(volcAsrApiKey && volcAsrResourceId) });
+    if (req.method === "GET" && req.url === "/api/config") return json(res, 200, { configured: Boolean(apiKey && model), provider: "Kimi Coding", model: parentModel, parentThinking: "disabled", asrConfigured: Boolean(volcAsrApiKey && volcAsrResourceId), trainingAssets: getTrainingAssetStats() });
     if (req.method === "GET" && req.url === "/api/health") return json(res, 200, { ok: true, configured: Boolean(apiKey && model), asrConfigured: Boolean(volcAsrApiKey && volcAsrResourceId) });
     if (req.method === "POST" && req.url.startsWith("/api/") && !allowRequest(req)) return json(res, 429, { error: "请求过于频繁，请稍后再试。" });
     if (req.method === "POST" && req.url === "/api/model-test") return json(res, 200, { ok: true, provider: "Kimi Coding", model: parentModel, thinking: "disabled", response: await testModelConnection() });
