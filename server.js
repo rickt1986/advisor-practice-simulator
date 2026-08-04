@@ -125,6 +125,7 @@ async function transcribeWithVolcAsr(audio) {
         "X-Api-Key": volcAsrApiKey,
         "X-Api-Resource-Id": volcAsrResourceId,
         "X-Api-Request-Id": requestId,
+        "X-Api-Connect-Id": requestId,
         "X-Api-Sequence": "-1",
       },
       handshakeTimeout: 10000,
